@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 15px;
+      font-size: 13px;
+    }
+    .section {
+      margin-bottom: 20px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .section h3 {
+      margin-top: 0;
+      font-size: 14px;
+      color: #333;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+      font-size: 12px;
+    }
+    select, input[type="text"] {
+      width: 100%;
+      padding: 6px;
+      margin-bottom: 10px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      box-sizing: border-box;
+    }
+    .checkbox-group {
+      margin: 10px 0;
+    }
+    .checkbox-group label {
+      display: inline;
+      font-weight: normal;
+      margin-left: 5px;
+    }
+    button {
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 13px;
+      margin-right: 10px;
+    }
+    button:hover {
+      background-color: #357ae8;
+    }
+    #addColumnBtn {
+      background-color: #34a853;
+      padding: 8px 15px;
+      font-size: 12px;
+    }
+    #addColumnBtn:hover {
+      background-color: #2d8e47;
+    }
+    .column-mapping {
+      background-color: #f5f5f5;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 3px;
+      position: relative;
+    }
+    .remove-btn {
+      background-color: #ea4335;
+      padding: 5px 10px;
+      font-size: 11px;
+      position: absolute;
+      right: 10px;
+      top: 10px;
+    }
+    .remove-btn:hover {
+      background-color: #d33828;
+    }
+    #status {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 3px;
+      display: none;
+    }
+    .success {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .small-text {
+      font-size: 11px;
+      color: #666;
+      margin-top: -8px;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="section">
+    <h3>1. Select Sheets</h3>
+    <label>Primary Sheet:</label>
+    <select id="primarySheet">
+      <option value="">-- Select Sheet --</option>
+    </select>
+    
+    <div class="checkbox-group">
+      <input type="checkbox" id="createBackup" checked>
+      <label for="createBackup">Create backup of primary sheet</label>
+    </div>
+    
+    <label>Merging Sheet:</label>
+    <select id="mergingSheet">
+      <option value="">-- Select Sheet --</option>
+    </select>
+  </div>
+  
+  <div class="section">
+    <h3>2. Comparison Columns</h3>
+    <label>Primary Sheet Column:</label>
+    <select id="primaryCompareColumn">
+      <option value="">-- Select Column --</option>
+    </select>
+    
+    <label>Merging Sheet Column:</label>
+    <select id="mergingCompareColumn">
+      <option value="">-- Select Column --</option>
+    </select>
+  </div>
+  
+  <div class="section">
+    <h3>3. Columns to Transfer</h3>
+    <div id="columnMappings"></div>
+    <button id="addColumnBtn" onclick="addColumnMapping()">+ Add Column</button>
+  </div>
+  
+  <div class="section">
+    <h3>4. Options</h3>
+    <div class="checkbox-group">
+      <input type="checkbox" id="skipEmptyComparison" checked>
+      <label for="skipEmptyComparison">Skip rows with empty comparison values</label>
+    </div>
+    
+    <div class="checkbox-group">
+      <input type="checkbox" id="matchCase">
+      <label for="matchCase">Match case when comparing</label>
+    </div>
+    
+    <div class="checkbox-group">
+      <input type="checkbox" id="appendUnmatched">
+      <label for="appendUnmatched">Append unmatched rows from merging sheet</label>
+    </div>
+  </div>
+  
+  <button onclick="executeMerge()">Execute Merge</button>
+  
+  <div id="status"></div>
+  
+  <script>
+    var sheetNames = [];
+    var primaryHeaders = [];
+    var mergingHeaders = [];
+    var mappingCounter = 0;
+    
+    // Load sheet names on open
+    google.script.run.withSuccessHandler(function(names) {
+      sheetNames = names;
+      populateSheetDropdowns();
+    }).getSheetNames();
+    
+    function populateSheetDropdowns() {
+      var primarySelect = document.getElementById('primarySheet');
+      var mergingSelect = document.getElementById('mergingSheet');
+      
+      sheetNames.forEach(function(name) {
+        var option1 = document.createElement('option');
+        option1.value = name;
+        option1.text = name;
+        primarySelect.add(option1);
+        
+        var option2 = document.createElement('option');
+        option2.value = name;
+        option2.text = name;
+        mergingSelect.add(option2);
+      });
+    }
+    
+    document.getElementById('primarySheet').addEventListener('change', function() {
+      if (this.value) {
+        google.script.run.withSuccessHandler(function(headers) {
+          primaryHeaders = headers;
+          updatePrimaryCompareColumn();
+          updateAllColumnMappings();
+        }).getColumnHeaders(this.value);
+      }
+    });
+    
+    document.getElementById('mergingSheet').addEventListener('change', function() {
+      if (this.value) {
+        google.script.run.withSuccessHandler(function(headers) {
+          mergingHeaders = headers;
+          updateMergingCompareColumn();
+          updateAllColumnMappings();
+        }).getColumnHeaders(this.value);
+      }
+    });
+    
+    function updatePrimaryCompareColumn() {
+      var select = document.getElementById('primaryCompareColumn');
+      select.innerHTML = '<option value="">-- Select Column --</option>';
+      primaryHeaders.forEach(function(header) {
+        var option = document.createElement('option');
+        option.value = header.name;
+        option.text = header.name;
+        select.add(option);
+      });
+    }
+    
+    function updateMergingCompareColumn() {
+      var select = document.getElementById('mergingCompareColumn');
+      select.innerHTML = '<option value="">-- Select Column --</option>';
+      mergingHeaders.forEach(function(header) {
+        var option = document.createElement('option');
+        option.value = header.name;
+        option.text = header.name;
+        select.add(option);
+      });
+    }
+    
+    function addColumnMapping() {
+      var container = document.getElementById('columnMappings');
+      var id = mappingCounter++;
+      
+      var div = document.createElement('div');
+      div.className = 'column-mapping';
+      div.id = 'mapping-' + id;
+      
+      div.innerHTML = `
+        <button class="remove-btn" onclick="removeMapping(${id})">Remove</button>
+        <label>From Merging Sheet:</label>
+        <select id="mergingCol-${id}">
+          <option value="">-- Select Column --</option>
+        </select>
+        <label>Replace Column in Primary Sheet (optional):</label>
+        <select id="replaceCol-${id}">
+          <option value="">-- Add as New Column --</option>
+        </select>
+        <div class="small-text">Leave empty to add as a new column</div>
+      `;
+      
+      container.appendChild(div);
+      
+      // Populate dropdowns
+      var mergingSelect = document.getElementById('mergingCol-' + id);
+      mergingHeaders.forEach(function(header) {
+        var option = document.createElement('option');
+        option.value = header.name;
+        option.text = header.name;
+        mergingSelect.add(option);
+      });
+      
+      var replaceSelect = document.getElementById('replaceCol-' + id);
+      primaryHeaders.forEach(function(header) {
+        var option = document.createElement('option');
+        option.value = header.name;
+        option.text = header.name;
+        replaceSelect.add(option);
+      });
+    }
+    
+    function removeMapping(id) {
+      var element = document.getElementById('mapping-' + id);
+      element.remove();
+    }
+    
+    function updateAllColumnMappings() {
+      // Update existing mappings when sheets change
+      var mappings = document.querySelectorAll('.column-mapping');
+      mappings.forEach(function(mapping) {
+        var id = mapping.id.split('-')[1];
+        
+        var mergingSelect = document.getElementById('mergingCol-' + id);
+        var replaceSelect = document.getElementById('replaceCol-' + id);
+        
+        if (mergingSelect) {
+          var currentValue = mergingSelect.value;
+          mergingSelect.innerHTML = '<option value="">-- Select Column --</option>';
+          mergingHeaders.forEach(function(header) {
+            var option = document.createElement('option');
+            option.value = header.name;
+            option.text = header.name;
+            if (header.name === currentValue) option.selected = true;
+            mergingSelect.add(option);
+          });
+        }
+        
+        if (replaceSelect) {
+          var currentValue = replaceSelect.value;
+          replaceSelect.innerHTML = '<option value="">-- Add as New Column --</option>';
+          primaryHeaders.forEach(function(header) {
+            var option = document.createElement('option');
+            option.value = header.name;
+            option.text = header.name;
+            if (header.name === currentValue) option.selected = true;
+            replaceSelect.add(option);
+          });
+        }
+      });
+    }
+    
+    function executeMerge() {
+      // Validate inputs
+      var primarySheet = document.getElementById('primarySheet').value;
+      var mergingSheet = document.getElementById('mergingSheet').value;
+      var primaryCompareColumn = document.getElementById('primaryCompareColumn').value;
+      var mergingCompareColumn = document.getElementById('mergingCompareColumn').value;
+      
+      if (!primarySheet || !mergingSheet) {
+        showStatus('Please select both sheets', 'error');
+        return;
+      }
+      
+      if (primarySheet === mergingSheet) {
+        showStatus('Primary and merging sheets must be different', 'error');
+        return;
+      }
+      
+      if (!primaryCompareColumn || !mergingCompareColumn) {
+        showStatus('Please select comparison columns', 'error');
+        return;
+      }
+      
+      // Collect column mappings
+      var columnsToTransfer = [];
+      var mappings = document.querySelectorAll('.column-mapping');
+      
+      if (mappings.length === 0) {
+        showStatus('Please add at least one column to transfer', 'error');
+        return;
+      }
+      
+      mappings.forEach(function(mapping) {
+        var id = mapping.id.split('-')[1];
+        var mergingCol = document.getElementById('mergingCol-' + id).value;
+        var replaceCol = document.getElementById('replaceCol-' + id).value;
+        
+        if (mergingCol) {
+          columnsToTransfer.push({
+            mergingColumn: mergingCol,
+            replaceColumn: replaceCol || null
+          });
+        }
+      });
+      
+      if (columnsToTransfer.length === 0) {
+        showStatus('Please select at least one column from the merging sheet', 'error');
+        return;
+      }
+      
+      // Build parameters
+      var params = {
+        primarySheet: primarySheet,
+        mergingSheet: mergingSheet,
+        primaryCompareColumn: primaryCompareColumn,
+        mergingCompareColumn: mergingCompareColumn,
+        columnsToTransfer: columnsToTransfer,
+        createBackup: document.getElementById('createBackup').checked,
+        skipEmptyComparison: document.getElementById('skipEmptyComparison').checked,
+        matchCase: document.getElementById('matchCase').checked,
+        appendUnmatched: document.getElementById('appendUnmatched').checked
+      };
+      
+      showStatus('Processing merge...', 'success');
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showStatus(result.message, 'success');
+          } else {
+            showStatus(result.message, 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showStatus('Error: ' + error.message, 'error');
+        })
+        .performMerge(params);
+    }
+    
+    function showStatus(message, type) {
+      var status = document.getElementById('status');
+      status.textContent = message;
+      status.className = type;
+      status.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
